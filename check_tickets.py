@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Watches District.in cinema pages for a specific movie and fires an
-email + ntfy.sh push notification the moment it appears in the listing
-(i.e. the moment tickets open for booking there).
+email the moment it appears in the listing (i.e. the moment tickets
+open for booking there).
 
 Configuration lives in the block below — edit MOVIE_KEYWORDS / CINEMAS
 to track something else in future.
@@ -84,21 +84,6 @@ def send_email(subject: str, body: str) -> None:
         server.sendmail(gmail_user, [to_addr], msg.as_string())
 
 
-def send_ntfy(message: str) -> None:
-    topic = os.environ.get("NTFY_TOPIC")
-    if not topic:
-        return
-    try:
-        requests.post(
-            f"https://ntfy.sh/{topic}",
-            data=message.encode("utf-8"),
-            headers={"Title": "Tickets are LIVE", "Priority": "urgent", "Tags": "tickets"},
-            timeout=10,
-        )
-    except requests.RequestException as exc:
-        print(f"ntfy send failed: {exc}", file=sys.stderr)
-
-
 def main() -> None:
     state = load_state()
     changed = False
@@ -123,8 +108,6 @@ def main() -> None:
             except Exception as exc:
                 print(f"Email send failed: {exc}", file=sys.stderr)
 
-            send_ntfy(f"{cinema_name}: booking is open! {url}")
-
             state[cinema_name] = True
             changed = True
         else:
@@ -136,3 +119,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+    
+
