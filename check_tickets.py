@@ -16,7 +16,8 @@ import sys
 from email.mime.text import MIMEText
 from pathlib import Path
 
-import requests
+from curl_cffi import requests
+from curl_cffi.requests.exceptions import RequestException
 
 # ---------------------------------------------------------------------------
 # CONFIG — edit this to track a different movie / cinema later
@@ -38,13 +39,6 @@ MOVIE_LINK_RE = re.compile(
     r"/movies/([a-z0-9\-]+)-movie-tickets-in-[a-z\-]+-MV\d+", re.IGNORECASE
 )
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-    )
-}
-
 # ---------------------------------------------------------------------------
 
 
@@ -59,7 +53,7 @@ def save_state(state: dict) -> None:
 
 
 def fetch_movie_slugs(url: str) -> set:
-    resp = requests.get(url, headers=HEADERS, timeout=20)
+    resp = requests.get(url, impersonate="chrome124", timeout=20)
     resp.raise_for_status()
     return {m.group(1).lower() for m in MOVIE_LINK_RE.finditer(resp.text)}
 
@@ -94,7 +88,7 @@ def main() -> None:
 
         try:
             slugs = fetch_movie_slugs(url)
-        except requests.RequestException as exc:
+        except RequestException as exc:
             print(f"Failed to fetch {cinema_name}: {exc}", file=sys.stderr)
             continue
 
@@ -119,5 +113,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-    
+
+
+
 
