@@ -71,13 +71,12 @@ def save_state(state: dict) -> None:
 
 def extract_now_showing_titles(html: str) -> set:
     """Titles currently showing AT THIS CINEMA specifically."""
-    m = FAQ_SENTENCE_RE.search(html)
+     m = FAQ_SENTENCE_RE.search(html)
     if m:
-        raw = m.group(1).replace(" and ", ", ")
+        raw = m.group(1)
         titles = {t.strip().lower() for t in raw.split(",") if t.strip()}
         if titles:
             return titles
-
     # Fallback: scoped link scan, cut off before citywide footer sections
     cutoff = len(html)
     for marker in FOOTER_CUTOFF_MARKERS:
