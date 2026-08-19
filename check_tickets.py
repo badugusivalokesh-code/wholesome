@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
 Watches District.in cinema pages for a specific movie and fires an
-email the moment it appears in the listing (i.e. the moment tickets
-open for booking there).
+email the moment it appears in the CURRENT LINEUP AT THAT SPECIFIC
+CINEMA (not just anywhere in the city -- the page also lists every
+movie showing citywide in a footer section, which this deliberately
+ignores).
 
 Uses ZenRows (https://www.zenrows.com) to route the request through
 its anti-bot-bypass proxy network, since District.in blocks requests
 coming directly from cloud/datacenter IP ranges like GitHub Actions.
 
-Configuration lives in the block below — edit MOVIE_KEYWORDS / CINEMAS
+Configuration lives in the block below -- edit MOVIE_KEYWORDS / CINEMAS
 to track something else in future.
 """
 
@@ -24,10 +26,10 @@ import requests
 from zenrows import ZenRowsClient
 
 # ---------------------------------------------------------------------------
-# CONFIG — edit this to track a different movie / cinema later
+# CONFIG -- edit this to track a different movie / cinema later
 # ---------------------------------------------------------------------------
 
-# Lowercase substrings to match against the movie's URL slug on District.in
+# Lowercase substrings to match against a movie title
 MOVIE_KEYWORDS = ["irumudi"]
 
 CINEMAS = {
@@ -38,10 +40,21 @@ CINEMAS = {
 
 STATE_FILE = Path(__file__).parent / "state.json"
 
-# Matches links like /movies/irumudi-movie-tickets-in-nellore-MV123456
+# Primary signal: the page's own FAQ-style summary sentence naming exactly
+# what's currently showing AT THIS CINEMA, e.g.
+# "...is currently screening Vishwanath and Sons, Korean Kanakaraju, DC."
+FAQ_SENTENCE_RE = re.compile(r"currently screening\s*([^.<]+)\.", re.IGNORECASE)
+
+# Fallback signal: movie ticket links, e.g.
+# /movies/irumudi-movie-tickets-in-nellore-MV123456
 MOVIE_LINK_RE = re.compile(
     r"/movies/([a-z0-9\-]+)-movie-tickets-in-[a-z\-]+-MV\d+", re.IGNORECASE
 )
+
+# If the FAQ sentence isn't found, only scan for links BEFORE these
+# citywide footer sections start, so we never pick up "playing elsewhere
+# in the city" as "playing at this cinema".
+FOOTER_CUTOFF_MARKERS = ["Top Cinema Chains in India", "Where is "]
 
 # ---------------------------------------------------------------------------
 
@@ -56,15 +69,40 @@ def save_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=2))
 
 
-def fetch_movie_slugs(url: str) -> set:
+def extract_now_showing_titles(html: str) -> set:
+    """Titles currently showing AT THIS CINEMA specifically."""
+    m = FAQ_SENTENCE_RE.search(html)
+    if m:
+        raw = m.group(1).replace(" and ", ", ")
+        titles = {t.strip().lower() for t in raw.split(",") if t.strip()}
+        if titles:
+            return titles
+
+    # Fallback: scoped link scan, cut off before citywide footer sections
+    cutoff = len(html)
+    for marker in FOOTER_CUTOFF_MARKERS:
+        idx = html.find(marker)
+        if idx != -1:
+            cutoff = min(cutoff, idx)
+    scoped_html = html[:cutoff]
+    return {
+        m.group(1).lower().replace("-", " ")
+        for m in MOVIE_LINK_RE.finditer(scoped_html)
+    }
+
+
+def fetch_now_showing(url: str) -> set:
     client = ZenRowsClient(os.environ["ZENROWS_API_KEY"])
     resp = client.get(url, params={"js_render": False})
     resp.raise_for_status()
-    return {m.group(1).lower() for m in MOVIE_LINK_RE.finditer(resp.text)}
+    return extract_now_showing_titles(resp.text)
 
 
-def movie_is_listed(slugs: set) -> bool:
-    return any(any(kw in slug for kw in MOVIE_KEYWORDS) for slug in slugs)
+def find_match(titles: set) -> str | None:
+    for title in titles:
+        if any(kw in title for kw in MOVIE_KEYWORDS):
+            return title
+    return None
 
 
 def send_email(subject: str, body: str) -> None:
@@ -92,15 +130,20 @@ def main() -> None:
             continue  # already notified for this cinema, don't spam
 
         try:
-            slugs = fetch_movie_slugs(url)
+            titles = fetch_now_showing(url)
         except requests.exceptions.RequestException as exc:
             print(f"Failed to fetch {cinema_name}: {exc}", file=sys.stderr)
             continue
 
-        if movie_is_listed(slugs):
-            subject = f"Tickets are open - {cinema_name}"
-            body = f"Booking just opened for your movie at {cinema_name}.\n\nBook now: {url}"
-            print(f"MATCH: {cinema_name} -- sending alerts")
+        match = find_match(titles)
+        if match:
+            movie_label = match.title()
+            subject = f"Tickets are open - {movie_label} @ {cinema_name}"
+            body = (
+                f"'{movie_label}' just appeared in the now-showing list "
+                f"for {cinema_name}.\n\nBook now: {url}"
+            )
+            print(f"MATCH: '{movie_label}' at {cinema_name} -- sending alert")
 
             try:
                 send_email(subject, body)
@@ -110,7 +153,7 @@ def main() -> None:
             state[cinema_name] = True
             changed = True
         else:
-            print(f"No match yet: {cinema_name}")
+            print(f"No match yet at {cinema_name}. Currently showing: {sorted(titles)}")
 
     if changed:
         save_state(state)
@@ -118,6 +161,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
