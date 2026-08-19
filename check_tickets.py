@@ -4,6 +4,10 @@ Watches District.in cinema pages for a specific movie and fires an
 email the moment it appears in the listing (i.e. the moment tickets
 open for booking there).
 
+Uses ZenRows (https://www.zenrows.com) to route the request through
+its anti-bot-bypass proxy network, since District.in blocks requests
+coming directly from cloud/datacenter IP ranges like GitHub Actions.
+
 Configuration lives in the block below — edit MOVIE_KEYWORDS / CINEMAS
 to track something else in future.
 """
@@ -16,8 +20,8 @@ import sys
 from email.mime.text import MIMEText
 from pathlib import Path
 
-from curl_cffi import requests
-from curl_cffi.requests.exceptions import RequestException
+import requests
+from zenrows import ZenRowsClient
 
 # ---------------------------------------------------------------------------
 # CONFIG — edit this to track a different movie / cinema later
@@ -53,7 +57,8 @@ def save_state(state: dict) -> None:
 
 
 def fetch_movie_slugs(url: str) -> set:
-    resp = requests.get(url, impersonate="chrome124", timeout=20)
+    client = ZenRowsClient(os.environ["ZENROWS_API_KEY"])
+    resp = client.get(url, params={"js_render": False})
     resp.raise_for_status()
     return {m.group(1).lower() for m in MOVIE_LINK_RE.finditer(resp.text)}
 
@@ -88,7 +93,7 @@ def main() -> None:
 
         try:
             slugs = fetch_movie_slugs(url)
-        except RequestException as exc:
+        except requests.exceptions.RequestException as exc:
             print(f"Failed to fetch {cinema_name}: {exc}", file=sys.stderr)
             continue
 
@@ -113,7 +118,6 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
 
 
 
